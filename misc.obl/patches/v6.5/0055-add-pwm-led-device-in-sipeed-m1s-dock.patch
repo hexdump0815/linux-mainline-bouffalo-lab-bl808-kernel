@@ -1,0 +1,58 @@
+from: https://github.com/bouffalolab/linux-dev/commit/091a59aa32e138526476ef67aa8dd8f565b6288f
+
+From 091a59aa32e138526476ef67aa8dd8f565b6288f Mon Sep 17 00:00:00 2001
+From: qhli <qhli@bouffalolab.com>
+Date: Fri, 27 Oct 2023 15:57:55 +0800
+Subject: [PATCH] riscv: bl808: linux dts: add PWM-LED device in Sipeed M1s
+ Dock
+
+	Using PWM-LED makes PWM functionality testing more intuitive.
+
+Signed-off-by: qhli <qhli@bouffalolab.com>
+---
+ .../boot/dts/bouffalolab/bl808-sipeed-m1s.dts | 20 +++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts b/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
+index d4aaa0bee..f168459d2 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
++++ b/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
+@@ -48,11 +48,26 @@
+ 
+ 	leds {
+         compatible = "gpio-leds";
++		status = "disabled";
+ 
+         led {
+             gpios = <&pinctrl 8 GPIO_ACTIVE_LOW>;
+         };
+     };
++
++	pwm-leds {
++		compatible = "pwm-leds";
++		pinctrl-names = "default";
++		pinctrl-0 = <&pwm_led>;
++		status = "okay";
++
++		led-0 {
++			pwms = <&pwm0 0 500000 0>;
++			active-low;
++			max-brightness = <255>;
++			label = "pwm_led0";
++		};
++	};
+ };
+ 
+ &pinctrl {
+@@ -62,6 +77,11 @@
+ 		pins = "GPIO8";
+ 		function = "gpio";
+ 	};
++
++	pwm_led: pwm_led {
++		pins = "GPIO8";
++		function = "pwm0";
++	};
+ };
+ 
+ &seceng {

@@ -1,0 +1,6 @@
+cd /compile/source
+#git clone -b bl808 https://github.com/openbouffalo/opensbi opensbi-obl
+git clone -b v1.2 https://github.com/riscv-software-src/opensbi
+cd opensbi-obl
+for i in /compile/doc/stable-bl/misc.obl/patches/opensbi/*.patch; do echo === $i; patch -p1 < $i; done
+make PLATFORM=generic FW_JUMP=y

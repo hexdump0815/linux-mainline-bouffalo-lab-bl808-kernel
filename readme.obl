@@ -1,0 +1,82 @@
+# directories:
+# - /compile/doc/stable-bl - the files in this dir
+# - /compile/source/linux-stable-obl - the kernel sources checked out from gitrepo
+# - /compile/result/stable-bl - the resulting kernel, modules etc. tar.gz files
+# - /compile/doc/kernel-config-options - https://github.com/hexdump0815/kernel-config-options
+# name: stb-obl - linux stable based tree adjusted based on openbouffalo project bl808 tree
+
+# info: this is based on v6.5.11 of the linux-stable tree
+#       some more things besides the kernel have to be compiled in the following order:
+#       - readme.opensbi (low level firmware)
+#       - readme.u-boot (u-boot)
+#       - readme.obl (kernel)
+
+cd /compile/source
+# required later for the wifi driver
+git clone https://github.com/bouffalolab/blwnet_xram
+cd /compile/source/linux-stable-obl
+
+# patches
+# add some patches from the openbouffalo project - https://github.com/openbouffalo/buildroot_bouffalo
+# plus some more patches from https://github.com/bouffalolab/linux-dev
+for i in /compile/doc/stable-bl/misc.obl/patches/v6.5/00*.patch; do echo === $i; patch -p1 < $i; done
+# fix kernel version number: + instead of -dirty at the end
+patch -p1 < /compile/doc/stable-bl/misc.obl/patches/v6.5/fix-kernel-version-number.patch
+# enable usb host mode
+patch -p1 < /compile/doc/stable-bl/misc.obl/patches/v6.5/use-usb-host-mode.patch
+
+export ARCH=riscv
+# lets start with the openbouffalo defconfig and later adjust options from there
+#scripts/kconfig/merge_config.sh -m /compile/doc/stable-bl/misc.obl/misc/linux_defconfig /compile/doc/stable-bl/misc.obl/options/additional-options-special.cfg
+scripts/kconfig/merge_config.sh -m /compile/doc/stable-bl/misc.obl/misc/linux_defconfig /compile/doc/kernel-config-options/docker-options.cfg /compile/doc/kernel-config-options/options-to-remove-generic.cfg /compile/doc/stable-bl/misc.obl/options/options-to-remove-special.cfg /compile/doc/kernel-config-options/additional-options-generic.cfg /compile/doc/kernel-config-options/additional-options-riscv.cfg /compile/doc/stable-bl/misc.obl/options/additional-options-special.cfg
+( cd /compile/doc/kernel-config-options ; git rev-parse --verify HEAD ) > /compile/doc/stable-bl/misc.obl/options/kernel-config-options.version
+make olddefconfig
+make -j 4 Image dtbs modules
+# the tools will not work due to libc etc. differences when compiled on debian and run on alpine
+#cd tools/perf
+# without this it would fail on warnings
+#export WERROR=0
+#make
+#cd ../power/cpupower
+#make
+#cd ../../..
+export kver=`make kernelrelease`
+echo ${kver}
+# remove debug info if there and not wanted
+#find . -type f -name '*.ko' | sudo xargs -n 1 objcopy --strip-unneeded
+make modules_install
+# the tools will not work due to libc etc. differences when compiled on debian and run on alpine
+#mkdir -p /lib/modules/${kver}/tools
+#cp -v tools/perf/perf /lib/modules/${kver}/tools
+#cp -v tools/power/cpupower/cpupower /lib/modules/${kver}/tools
+#cp -v tools/power/cpupower/libcpupower.so.0.0.1 /lib/modules/${kver}/tools/libcpupower.so.0
+# make headers_install INSTALL_HDR_PATH=/usr
+mkdir -p /boot
+cp -v .config /boot/config-${kver}
+cp -v arch/riscv/boot/Image /boot/Image-${kver}
+mkdir -p /boot/dtb-${kver}
+cp -v arch/riscv/boot/dts/bouffalolab/*.dtb /boot/dtb-${kver}
+cp -v System.map /boot/System.map-${kver}
+
+# build the wifi driver
+cd /compile/source/blwnet_xram
+# in case it was already patches before
+git checkout -- .
+# userspace tool linking is done statically so that it will work on both glibc and musl systems
+patch -p1 < /compile/doc/stable-bl/misc.obl/patches/wifi/link-static.patch
+make CONFIG_BL_INTF=XRAM KDIR=/compile/source/linux-stable-obl ARCH=riscv
+# get the wifi driver and userspace tools from above
+mkdir -p /opt/blwnet
+cp -v /compile/source/blwnet_xram/blwnet.ko /opt/blwnet
+cp -v /compile/source/blwnet_xram/userspace/blctl /compile/source/blwnet_xram/userspace/blctld /opt/blwnet
+cp -v /compile/source/blwnet_xram/fw/bl808-m0-fh.bin /opt/blwnet
+
+cd /boot
+# no initrd for now
+#update-initramfs -c -k ${kver}
+#tar cvzf /compile/source/linux-stable-obl/${kver}.tar.gz /boot/Image-${kver} /boot/System.map-${kver} /boot/config-${kver} /boot/dtb-${kver} /boot/initrd.img-${kver} /lib/modules/${kver} /opt/blwnet
+tar cvzf /compile/source/linux-stable-obl/${kver}.tar.gz /boot/Image-${kver} /boot/System.map-${kver} /boot/config-${kver} /boot/dtb-${kver} /lib/modules/${kver} /opt/blwnet
+cp -v /compile/doc/stable-bl/config.obl /compile/doc/stable-bl/config.obl.old
+cp -v /compile/source/linux-stable-obl/.config /compile/doc/stable-bl/config.obl
+cp -v /compile/source/linux-stable-obl/.config /compile/doc/stable-bl/config.obl-${kver}
+cp -v /compile/source/linux-stable-obl/*.tar.gz /compile/result/stable-bl

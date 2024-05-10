@@ -1,0 +1,20 @@
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 3d3babac8298..843eafa34a93 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -71,11 +71,13 @@ scm_version()
+ 
+ 	# If we are at the tagged commit, we ignore it because the version is
+ 	# well-defined.
+-	if [ -z "$(git describe --exact-match --match=$tag 2>/dev/null)" ]; then
++	#if [ -z "$(git describe --exact-match --match=$tag 2>/dev/null)" ]; then
++	if true; then
+ 
+ 		# If only the short version is requested, don't bother
+ 		# running further git commands
+-		if $short; then
++		#if $short; then
++		if true; then
+ 			echo "+"
+ 			return
+ 		fi

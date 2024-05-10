@@ -1,0 +1,16 @@
+# first make sure to do the opensbi build as described in readme.opensbi
+
+cd /compile/source
+git clone -b bl808/all https://github.com/openbouffalo/u-boot u-boot-obl
+cd u-boot-obl
+for i in /compile/doc/stable-bl/misc.obl/patches/u-boot/*.patch; do echo === $i; patch -p1 < $i; done
+#make ox64_d0_defconfig
+cp /compile/doc/stable-bl/misc.obl/misc/uboot_defconfig configs
+make uboot_defconfig
+make
+make u-boot.dtb
+
+# merge into flashable image:
+lz4 -9 -f u-boot.bin u-boot.bin.lz4
+/compile/doc/stable-bl/misc.obl/misc/mergebin.py -o bl808-firmware.bin -k u-boot.bin.lz4 -d u-boot.dtb -s /compile/source/opensbi-obl/build/platform/generic/firmware/fw_jump.bin
+# result: bl808-firmware.bin

@@ -1,0 +1,81 @@
+from: https://github.com/bouffalolab/linux-dev/commit/e405e4ea8d86500b853af84362173ddfcfb6a4c1
+
+From e405e4ea8d86500b853af84362173ddfcfb6a4c1 Mon Sep 17 00:00:00 2001
+From: qhli <qhli@bouffalolab.com>
+Date: Fri, 27 Oct 2023 15:10:16 +0800
+Subject: [PATCH] riscv: dts: bl808: add and enable PWM controller
+
+	Add two PWM controllers and enable both of them.
+
+Signed-off-by: qhli <qhli@bouffalolab.com>
+---
+ .../boot/dts/bouffalolab/bl808-pine64-ox64.dts   |  8 ++++++++
+ .../boot/dts/bouffalolab/bl808-sipeed-m1s.dts    |  8 ++++++++
+ arch/riscv/boot/dts/bouffalolab/bl808.dtsi       | 16 ++++++++++++++++
+ 3 files changed, 32 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts b/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
+index cba844d99..1035f7619 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
++++ b/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
+@@ -66,6 +66,14 @@
+ 	status = "okay";
+ };
+ 
++&pwm0 {
++	status = "okay";
++};
++
++&pwm1 {
++	status = "okay";
++};
++
+ /*
+ &ipclic {
+ 	status = "okay";
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts b/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
+index ec1fe89ea..d4aaa0bee 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
++++ b/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
+@@ -76,6 +76,14 @@
+ 	status = "okay";
+ };
+ 
++&pwm0 {
++	status = "okay";
++};
++
++&pwm1 {
++	status = "okay";
++};
++
+ /*
+ &ipclic {
+ 	status = "okay";
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808.dtsi b/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
+index 597fe2e39..96c208ec0 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
++++ b/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
+@@ -113,6 +113,22 @@
+ 			status = "disabled";
+ 		};
+ 
++		pwm0: pwm@2000a440 {
++			compatible = "bflb,bl808-pwm";
++			reg = <0x2000a440 0x40>;
++			clocks = <&xtal>;
++			#pwm-cells = <3>;
++			status = "disabled";
++		};
++
++		pwm1: pwm@2000a480 {
++			compatible = "bflb,bl808-pwm";
++			reg = <0x2000a480 0x40>;
++			clocks = <&xtal>;
++			#pwm-cells = <3>;
++			status = "disabled";
++		};
++
+ 		/*
+ 		ipclic: mailbox@30005000 {
+ 			compatible = "bflb,bl808-ipc";

@@ -1,0 +1,396 @@
+from: https://github.com/bouffalolab/linux-dev/commit/153e1430f37063fc9d9558903c17efefe62377ac
+
+From 153e1430f37063fc9d9558903c17efefe62377ac Mon Sep 17 00:00:00 2001
+From: qhli <qhli@bouffalolab.com>
+Date: Fri, 27 Oct 2023 09:44:28 +0800
+Subject: [PATCH] pwm: bl808: add Bouffalo Lab bl808 pwm controller driver
+
+	Add support of PWM controller driver of Bouffalo Lab SoC, say bl808.
+	This driver is based on the generic pwm driver framework, and it has
+	been tested in sipeed M1s Dock.
+
+Signed-off-by: qhli <qhli@bouffalolab.com>
+---
+ .../devicetree/bindings/pwm/pwm-bflb.txt      |  17 +
+ .../devicetree/bindings/vendor-prefixes.yaml  |   2 +
+ drivers/pwm/Kconfig                           |  11 +
+ drivers/pwm/Makefile                          |   1 +
+ drivers/pwm/pwm-bflb.c                        | 298 ++++++++++++++++++
+ 5 files changed, 329 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/pwm/pwm-bflb.txt
+ create mode 100644 drivers/pwm/pwm-bflb.c
+
+diff --git a/Documentation/devicetree/bindings/pwm/pwm-bflb.txt b/Documentation/devicetree/bindings/pwm/pwm-bflb.txt
+new file mode 100644
+index 000000000..d70797e96
+--- /dev/null
++++ b/Documentation/devicetree/bindings/pwm/pwm-bflb.txt
+@@ -0,0 +1,17 @@
++Bouffalo Lab PWM controller
++
++Required properties:
++- compatible: should be "bflb,bl808-pwm"
++- reg: physical base address and length of the controller's registers
++- clocks: phandle to the input clock
++- #pwm-cells: should be 3. See pwm.yaml in this directory for a description of
++  the cells format.
++
++Example:
++
++pwm: pwm@2000a440 {
++	compatible = "bflb,bl808-pwm";
++	reg = <0x2000a440 0x40>;
++	clocks = <&chip_clk CLKID_CFG>;
++	#pwm-cells = <3>;
++}
+diff --git a/Documentation/devicetree/bindings/vendor-prefixes.yaml b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+index af60bf1a6..41fd8c583 100644
+--- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
++++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+@@ -190,6 +190,8 @@ patternProperties:
+     description: Compass Electronics Group, LLC
+   "^beagle,.*":
+     description: BeagleBoard.org Foundation
++  "^bflb,.*":
++    description: Bouffalo Lab
+   "^bhf,.*":
+     description: Beckhoff Automation GmbH & Co. KG
+   "^bitmain,.*":
+diff --git a/drivers/pwm/Kconfig b/drivers/pwm/Kconfig
+index 6210babb0..55954e073 100644
+--- a/drivers/pwm/Kconfig
++++ b/drivers/pwm/Kconfig
+@@ -537,6 +537,17 @@ config PWM_SIFIVE
+ 	  To compile this driver as a module, choose M here: the module
+ 	  will be called pwm-sifive.
+ 
++config PWM_BFLB
++	tristate "Bouffalo Lab PWM support"
++	depends on OF
++	depends on COMMON_CLK && HAS_IOMEM
++	depends on RISCV || COMPILE_TEST
++	help
++	  Generic PWM framework driver for Bouffalo Lab SoCs, say bl808.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called pwm-bflb.
++
+ config PWM_SL28CPLD
+ 	tristate "Kontron sl28cpld PWM support"
+ 	depends on MFD_SL28CPLD || COMPILE_TEST
+diff --git a/drivers/pwm/Makefile b/drivers/pwm/Makefile
+index c822389c2..085250b79 100644
+--- a/drivers/pwm/Makefile
++++ b/drivers/pwm/Makefile
+@@ -49,6 +49,7 @@ obj-$(CONFIG_PWM_ROCKCHIP)	+= pwm-rockchip.o
+ obj-$(CONFIG_PWM_RZ_MTU3)	+= pwm-rz-mtu3.o
+ obj-$(CONFIG_PWM_SAMSUNG)	+= pwm-samsung.o
+ obj-$(CONFIG_PWM_SIFIVE)	+= pwm-sifive.o
++obj-$(CONFIG_PWM_BFLB)		+= pwm-bflb.o
+ obj-$(CONFIG_PWM_SL28CPLD)	+= pwm-sl28cpld.o
+ obj-$(CONFIG_PWM_SPEAR)		+= pwm-spear.o
+ obj-$(CONFIG_PWM_SPRD)		+= pwm-sprd.o
+diff --git a/drivers/pwm/pwm-bflb.c b/drivers/pwm/pwm-bflb.c
+new file mode 100644
+index 000000000..a7cc6cbe9
+--- /dev/null
++++ b/drivers/pwm/pwm-bflb.c
+@@ -0,0 +1,298 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2016-2023 Bouffalo Lab
++ */
++#include <linux/clk.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/pwm.h>
++#include <linux/slab.h>
++#include <linux/bitfield.h>
++
++#define BFLB_PWM_CHANNEL_NUM	4
++
++/* register offsets */
++#define BFLB_PWM_REG_CFG0			0x00
++#define BFLB_PWM_REG_CFG1			0x04
++#define BFLB_PWM_REG_PERIOD			0x08
++#define BFLB_PWM_REG_THRESHOLD(ch)	(0x10 + ((ch) << 2))
++
++/* pwm config0 fields */
++#define BFLB_PWM_CFG0_CLK_DIV_MASK		GENMASK(15, 0)
++#define BFLB_PWM_CFG0_STOP_ON_REPT		BIT(19)
++#define BFLB_PWM_CFG0_ADC_TRIG_SRC_MASK	GENMASK(23, 20)
++#define BFLB_PWM_CFG0_SW_BRK			BIT(24)
++#define BFLB_PWM_CFG0_EXT_BRK_EN		BIT(25)
++#define BFLB_PWM_CFG0_EXT_BRK_POL		BIT(26)
++#define BFLB_PWM_CFG0_STOP_ENABLE		BIT(27)
++#define BFLB_PWM_CFG0_GRACEFUL_STOP		BIT(28)
++#define BFLB_PWM_CFG0_STOP_STATUS		BIT(29)
++#define BFLB_PWM_CFG0_CLK_SRC_MASK		GENMASK(31, 30)
++
++#define BFLB_PWM_ADC_TRIG_SRC_NONE	0xf
++#define BFLB_PWM_CLK_SRC_XCLK		0
++#define BFLB_PWM_CLK_SRC_BCLK		1
++#define BFLB_PWM_CLK_SRC_FCLK		2
++
++/* pwm config1 fields */
++#define BFLB_PWM_CFG1_POSITIVE_EN(ch)		BIT((ch) << 2)
++#define BFLB_PWM_CFG1_POSITIVE_SET_IDLE(ch)	BIT(1 + ((ch) << 2))
++#define BFLB_PWM_CFG1_NEGATIVE_EN(ch)		BIT(2 + ((ch) << 2))
++#define BFLB_PWM_CFG1_NEGATIVE_SET_IDLE(ch) BIT(3 + ((ch) << 2))
++#define BFLB_PWM_CFG1_POSITIVE_POLARITY(ch) BIT(16 + ((ch) << 1))
++#define BFLB_PWM_CFG1_NEGATIVE_POLARITY(ch) BIT(17 + ((ch) << 1))
++#define BFLB_PWM_CFG1_POSITIVE_BREAK(ch)	BIT(24 + ((ch) << 1))
++#define BFLB_PWM_CFG1_NEGATIVE_BREAK(ch)	BIT(25 + ((ch) << 1))
++
++struct bflb_pwm_chip {
++	struct pwm_chip	chip;
++	struct clk *clk;
++	void __iomem *reg_base;
++	unsigned int real_period;
++	unsigned int approx_period;
++	atomic_t user_count;
++};
++
++static inline
++struct bflb_pwm_chip *pwm_chip_downcast(struct pwm_chip *c)
++{
++	return container_of(c, struct bflb_pwm_chip, chip);
++}
++
++static int bflb_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
++{
++	struct bflb_pwm_chip *bpc = pwm_chip_downcast(chip);
++
++	atomic_inc(&bpc->user_count);
++	return 0;
++}
++
++static void bflb_pwm_free(struct pwm_chip *chip, struct pwm_device *pwm)
++{
++	struct bflb_pwm_chip *bpc = pwm_chip_downcast(chip);
++
++	atomic_dec(&bpc->user_count);
++}
++
++static int bflb_pwm_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
++				struct pwm_state *state)
++{
++	u32 duty, val;
++	struct bflb_pwm_chip *bpc = pwm_chip_downcast(chip);
++
++	/*
++	 * pwm is enabled if it is not stopped && output is enabled &&
++	 * duty cycle > 0.
++	 */
++	duty = readl(bpc->reg_base + BFLB_PWM_REG_THRESHOLD(pwm->hwpwm));
++	duty >>= 16;
++
++	state->enabled = false;
++	val = readl(bpc->reg_base + BFLB_PWM_REG_CFG0);
++	if (!(val & BFLB_PWM_CFG0_STOP_ENABLE)) {
++		val = readl(bpc->reg_base + BFLB_PWM_REG_CFG1);
++		if ((val & BFLB_PWM_CFG1_POSITIVE_EN(pwm->hwpwm)) ||
++			(val & BFLB_PWM_CFG1_NEGATIVE_EN(pwm->hwpwm)))
++			state->enabled = !!duty;
++	}
++
++	val = readl(bpc->reg_base + BFLB_PWM_REG_PERIOD) & 0xffff;
++	state->period = val * NSEC_PER_SEC / clk_get_rate(bpc->clk);
++	state->duty_cycle = duty * NSEC_PER_SEC / clk_get_rate(bpc->clk);
++	state->polarity = PWM_POLARITY_NORMAL;
++	return 0;
++}
++
++static void bflb_pwm_disable(struct bflb_pwm_chip *bpc, unsigned int ch)
++{
++	u32 val;
++
++	val = readl(bpc->reg_base + BFLB_PWM_REG_CFG1);
++	val &= ~BFLB_PWM_CFG1_POSITIVE_EN(ch);
++	val &= ~BFLB_PWM_CFG1_NEGATIVE_EN(ch);
++	writel(val, bpc->reg_base + BFLB_PWM_REG_CFG1);
++}
++
++static void bflb_pwm_set_config(struct bflb_pwm_chip *bpc, unsigned int ch,
++								u64 period_ns, u64 duty_ns)
++{
++	u32 val, tmp;
++	unsigned long clk_rate = clk_get_rate(bpc->clk);
++
++	/* set period */
++	val = readl(bpc->reg_base + BFLB_PWM_REG_PERIOD);
++	tmp = (clk_rate * period_ns / NSEC_PER_SEC) & 0xffff;
++	val &= ~GENMASK(15, 0);
++	val |= FIELD_PREP(GENMASK(15, 0), tmp);
++	writel(val, bpc->reg_base + BFLB_PWM_REG_PERIOD);
++
++	/* set duty cycle */
++	tmp = (clk_rate * duty_ns / NSEC_PER_SEC) & 0xffff;
++	val = FIELD_PREP(GENMASK(31, 16), tmp);
++	writel(val, bpc->reg_base + BFLB_PWM_REG_THRESHOLD(ch));
++
++	/* enable output */
++	val = readl(bpc->reg_base + BFLB_PWM_REG_CFG1);
++	val |= BFLB_PWM_CFG1_POSITIVE_EN(ch);
++	val |= BFLB_PWM_CFG1_NEGATIVE_EN(ch);
++	val &= ~BFLB_PWM_CFG1_POSITIVE_SET_IDLE(ch);
++	val &= ~BFLB_PWM_CFG1_NEGATIVE_SET_IDLE(ch);
++	val |= BFLB_PWM_CFG1_POSITIVE_POLARITY(ch);
++	val |= BFLB_PWM_CFG1_NEGATIVE_POLARITY(ch);
++	writel(val, bpc->reg_base + BFLB_PWM_REG_CFG1);
++
++	/* fire */
++	val = readl(bpc->reg_base + BFLB_PWM_REG_CFG0);
++	val &= ~BFLB_PWM_CFG0_STOP_ENABLE;
++	writel(val, bpc->reg_base + BFLB_PWM_REG_CFG0);
++}
++
++static int bflb_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
++			    const struct pwm_state *state)
++{
++	int err;
++	bool enabled;
++	struct bflb_pwm_chip *bpc = pwm_chip_downcast(chip);
++
++	if (state->polarity != PWM_POLARITY_NORMAL)
++		return -EINVAL;
++
++	enabled = pwm->state.enabled;
++	if (!state->enabled) {
++		bflb_pwm_disable(bpc, pwm->hwpwm);
++		if (enabled)
++			clk_disable(bpc->clk);
++	} else {
++		if (!enabled) {
++			err = clk_enable(bpc->clk);
++			if (err) {
++				dev_err(bpc->chip.dev, "failed to enable clk, %d\n", err);
++				return err;
++			}
++		}
++		bflb_pwm_set_config(bpc, pwm->hwpwm, state->period, state->duty_cycle);
++	}
++	return 0;
++}
++
++static const struct pwm_ops bflb_pwm_ops = {
++	.request = bflb_pwm_request,
++	.free = bflb_pwm_free,
++	.get_state = bflb_pwm_get_state,
++	.apply = bflb_pwm_apply,
++	.owner = THIS_MODULE,
++};
++
++static void bflb_pwm_init(struct bflb_pwm_chip *bpc)
++{
++	u32 val;
++
++	val = readl(bpc->reg_base + BFLB_PWM_REG_CFG0);
++	/* set clock division to 0 */
++	val |= FIELD_PREP(BFLB_PWM_CFG0_CLK_DIV_MASK, 0);
++	/* disable stop on reptation */
++	val &= ~BFLB_PWM_CFG0_STOP_ON_REPT;
++	/* disable adc trigger */
++	val |= FIELD_PREP(BFLB_PWM_CFG0_ADC_TRIG_SRC_MASK,
++			BFLB_PWM_ADC_TRIG_SRC_NONE);
++	/* disable sw break */
++	val &= ~BFLB_PWM_CFG0_SW_BRK;
++	/* disable ext break */
++	val &= ~BFLB_PWM_CFG0_EXT_BRK_EN;
++	/* disable pwm on initialization */
++	val |= BFLB_PWM_CFG0_STOP_ENABLE;
++	/* stop pwm gracefully */
++	val |= BFLB_PWM_CFG0_GRACEFUL_STOP;
++	/* select xclk as the source */
++	val |= FIELD_PREP(BFLB_PWM_CFG0_CLK_SRC_MASK, BFLB_PWM_CLK_SRC_XCLK);
++	writel(val, bpc->reg_base + BFLB_PWM_REG_CFG0);
++
++	/* disable all channels */
++	writel(0, bpc->reg_base + BFLB_PWM_REG_CFG1);
++}
++
++static int bflb_pwm_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct pwm_chip *chip;
++	struct bflb_pwm_chip *bpc;
++	struct device *dev = &pdev->dev;
++
++	bpc = devm_kzalloc(dev, sizeof(*bpc), GFP_KERNEL);
++	if (!bpc)
++		return -ENOMEM;
++
++	atomic_set(&bpc->user_count, 0);
++	chip = &bpc->chip;
++	chip->dev = dev;
++	chip->ops = &bflb_pwm_ops;
++	chip->npwm = BFLB_PWM_CHANNEL_NUM;
++
++	bpc->reg_base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(bpc->reg_base))
++		return PTR_ERR(bpc->reg_base);
++
++	bpc->clk = devm_clk_get_prepared(dev, NULL);
++	if (IS_ERR(bpc->clk)) {
++		return dev_err_probe(dev, PTR_ERR(bpc->clk),
++				     "Unable to find controller clock\n");
++	}
++
++	pr_debug("clk enabling, rate %lu\n", clk_get_rate(bpc->clk));
++	ret = clk_enable(bpc->clk);
++	if (ret) {
++		dev_err(dev, "failed to enable clock for pwm: %d\n", ret);
++		return ret;
++	}
++
++	bflb_pwm_init(bpc);
++	pr_debug("adding pwm chip\n");
++
++	ret = pwmchip_add(chip);
++	if (ret < 0) {
++		dev_err(dev, "cannot register PWM: %d\n", ret);
++		goto disable_clk;
++	}
++
++	platform_set_drvdata(pdev, bpc);
++	dev_dbg(dev, "Bouffalo Lab PWM chip registered %d devices", chip->npwm);
++	return 0;
++
++disable_clk:
++	clk_disable(bpc->clk);
++	return ret;
++}
++
++static void bflb_pwm_remove(struct platform_device *dev)
++{
++	int ch;
++	struct pwm_device *pwm;
++	struct bflb_pwm_chip *bpc = platform_get_drvdata(dev);
++
++	for (ch = 0; ch < bpc->chip.npwm; ch++) {
++		pwm = &bpc->chip.pwms[ch];
++		if (pwm->state.enabled)
++			clk_disable(bpc->clk);
++	}
++	pwmchip_remove(&bpc->chip);
++}
++
++static const struct of_device_id bflb_pwm_of_ids[] = {
++	{ .compatible = "bflb,bl808-pwm" },
++	{},
++};
++MODULE_DEVICE_TABLE(of, bflb_pwm_of_ids);
++
++static struct platform_driver pwm_bflb_driver = {
++	.probe = bflb_pwm_probe,
++	.remove_new = bflb_pwm_remove,
++	.driver = {
++		.name = "bl808-pwm",
++		.of_match_table = bflb_pwm_of_ids,
++	},
++};
++module_platform_driver(pwm_bflb_driver);
++
++MODULE_DESCRIPTION("Bouffalo Lab PWM driver");
++MODULE_LICENSE("GPL v2");

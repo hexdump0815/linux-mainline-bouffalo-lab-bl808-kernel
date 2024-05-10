@@ -1,0 +1,21 @@
+diff --git a/userspace/Makefile b/userspace/Makefile
+index f6f02fc..b7b9fd9 100644
+--- a/userspace/Makefile
++++ b/userspace/Makefile
+@@ -24,14 +24,14 @@ utils.o: utils.c utils.h
+ 
+ 
+ blctl: blctl_main.o $(CTLLIB)
+-	$(CC) $(CFLAGS) $^ -o $@ -L. -lblctl -lpthread
++	$(CC) -static $(CFLAGS) $^ -o $@ -L. -lblctl -lpthread
+ 
+ blctl_main.o: blctl_main.c utils.h
+ 	$(CC) $(CFLAGS) -c $< -o $@
+ 
+ 
+ blctld: blctld_main.o $(CTLLIB)
+-	$(CC) $(CFLAGS) $^ -o $@ -L. -lblctl -lpthread
++	$(CC) -static $(CFLAGS) $^ -o $@ -L. -lblctl -lpthread
+ 
+ blctld_main.o: blctld_main.c
+ 	$(CC) $(CFLAGS) -c $< -o $@

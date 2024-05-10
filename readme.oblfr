@@ -1,0 +1,30 @@
+# STATUS: not working yet - lowloads seem to still use speed 2000000 and fail with header error
+
+# this has to be run on a x86_64 system due to the toolchain used
+# and is based on https://openbouffalo.org/index.php/BL808_Custom_Lowload
+
+cd somewhere
+git clone https://github.com/hexdump0815/linux-mainline-bouffalo-labs-bl808-kernel stable-bl
+git clone https://gitee.com/bouffalolab/toolchain_gcc_t-head_linux
+cd toolchain_gcc_t-head_linux
+# branch master from Mon Oct 17 19:01:52 2022
+git checkout c4afe91cbd01bf7dce525e0d23b4219c8691e8f0
+cd ..
+git clone https://github.com/bouffalolab/bl_mcu_sdk
+cd bl_mcu_sdk
+# branch bl808_fw
+git checkout 1b76ad7586c2e481360d88fa7ffc6f5a9bc089eb
+cd ..
+git clone https://github.com/openbouffalo/OBLFR
+cd OBLFR
+# branch master from Thu Mar 2 04:18:49 2023
+git checkout 92bde04ef7487e4b4d333ae5a54b018a085fc0aa
+patch -p1 < ../stable-bl/misc.obl/patches/oblfr/oblfr-change-speed-to-115200.patch
+#patch -p1 < ../stable-bl/misc.obl/patches/oblfr/oblfr-enable-usb-host-mode.patch
+PATH=$PATH:$(pwd)/toolchain_gcc_t-head_linux/bin/
+cd OBLFR/apps/m0_lowload
+make
+# result: apps/m0_lowload/build/build_out/m0_lowload_bl808_m0.bin
+cd OBLFR/apps/d0_lowload
+make
+# result: apps/d0_lowload/build/build_out/d0_lowload_bl808_d0.bin

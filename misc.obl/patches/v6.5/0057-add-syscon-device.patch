@@ -1,0 +1,20 @@
+from: https://github.com/bouffalolab/linux-dev/commit/f1d9d1906d970b36873f2e3119f5655dd6757b69
+
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808.dtsi b/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
+index 0fec2768b..fcb69f863 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
++++ b/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
+@@ -61,6 +61,13 @@
+ 		#address-cells = <1>;
+ 		#size-cells = <1>;
+ 
++		syscon: syscon@0x20000000 {
++			compatible = "syscon", "simple-mfd";
++			reg = <0x20000000 0x1000>;
++			status = "okay";
++			reg-io-width = <4>;
++		};
++
+ 		pinctrl: pinctrl@0x200008C4 {
+ 			compatible = "bflb,bl808-pinctrl";
+ 			reg = <0x200008C4 0x1000>;

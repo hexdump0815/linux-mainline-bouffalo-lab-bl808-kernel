@@ -1,0 +1,26 @@
+based on https://github.com/openbouffalo/linux/pull/3 and
+and https://github.com/grant-olson/buildroot_bouffalo/tree/usb_gadgets/board/pine64/ox64/patches/oblfr
+
+diff --git a/components/mailbox/src/oblfr_usb_peripheral.c b/components/mailbox/src/oblfr_usb_peripheral.c
+index 2dc719b..a3f0358 100644
+--- a/components/mailbox/src/oblfr_usb_peripheral.c
++++ b/components/mailbox/src/oblfr_usb_peripheral.c
+@@ -98,13 +98,13 @@ oblfr_err_t setup_usb_peripheral(void)
+     
+     regval = getreg32(BFLB_PDS_BASE + PDS_USB_CTL_OFFSET);
+ 
+-#ifdef CONFIG_COMPONENT_MAILBOX_USB_HOST
++// #ifdef CONFIG_COMPONENT_MAILBOX_USB_HOST
+     LOG_I("USB Initialized in HOST mode\r\n");
+     regval &= ~PDS_REG_USB_IDDIG;
+-#else
+-    LOG_I("USB Initialized in DEVICE mode\r\n");
+-    regval |= PDS_REG_USB_IDDIG;
+-#endif
++// #else
++//     LOG_I("USB Initialized in DEVICE mode\r\n");
++//     regval |= PDS_REG_USB_IDDIG;
++// #endif
+ 
+     putreg32(regval, BFLB_PDS_BASE + PDS_USB_CTL_OFFSET);
+ 

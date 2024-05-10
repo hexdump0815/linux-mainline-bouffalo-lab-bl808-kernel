@@ -1,0 +1,15 @@
+from: https://github.com/grant-olson/buildroot_bouffalo/tree/usb_gadgets/board/pine64/ox64/patches/linux
+
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts b/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
+index 73a869240da3..6d687a23b288 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
++++ b/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
+@@ -59,7 +59,7 @@ &ipclic {
+ 	status = "okay";
+ };
+ 
+-&usb1 {
++&usb0 {
+ 	status = "okay";
+ };
+ 

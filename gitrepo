@@ -1,0 +1,5 @@
+origin	https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git (fetch)
+origin	https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git (push)
+
+for patches etc.: https://github.com/openbouffalo/buildroot_bouffalo
+for wifi firmware: https://github.com/bouffalolab/blwnet_xram

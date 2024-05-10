@@ -1,0 +1,236 @@
+from: https://github.com/bouffalolab/linux-dev/commit/fc616bf273084addc89e84a6a01be809662a7c8d
+
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts b/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
+index 47dd35334..359385204 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
++++ b/arch/riscv/boot/dts/bouffalolab/bl808-pine64-ox64.dts
+@@ -1,7 +1,4 @@
+ // SPDX-License-Identifier: (GPL-2.0+ or MIT)
+-/*
+- * Copyright (C) 2022 Jisheng Zhang <jszhang@kernel.org>
+- */
+ 
+ /dts-v1/;
+ 
+@@ -105,3 +102,7 @@
+ 		pinctrl-0 = <&spidev_pins>;
+ 	};
+ };
++
++&usb {
++	status = "okay";
++};
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts b/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
+index e8a11c6cd..1e099ce92 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
++++ b/arch/riscv/boot/dts/bouffalolab/bl808-sipeed-m1s.dts
+@@ -1,7 +1,4 @@
+ // SPDX-License-Identifier: (GPL-2.0+ or MIT)
+-/*
+- * Copyright (C) 2022 Jisheng Zhang <jszhang@kernel.org>
+- */
+ 
+ /dts-v1/;
+ 
+@@ -128,3 +125,7 @@
+ 		pinctrl-0 = <&spidev_pins>;
+ 	};
+ };
++
++&usb {
++	status = "okay";
++};
+diff --git a/arch/riscv/boot/dts/bouffalolab/bl808.dtsi b/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
+index 9a45a2fd7..77b376ef2 100644
+--- a/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
++++ b/arch/riscv/boot/dts/bouffalolab/bl808.dtsi
+@@ -75,6 +75,13 @@
+ 			reg-io-width = <4>;
+ 		};
+ 
++		pds_ctrl: pds-ctrl@0x2000e000 {
++			compatible = "syscon";
++			reg = <0x2000e000 0x1000>;
++			status = "okay";
++			reg-io-width = <4>;
++		};
++
+ 		pinctrl: pinctrl@0x200008C4 {
+ 			compatible = "bflb,bl808-pinctrl";
+ 			reg = <0x200008C4 0x1000>;
+@@ -220,6 +227,14 @@
+ 			status = "disabled";
+ 		};
+ 
++		usb: usb@20072000 {
++			compatible = "faraday,fotg210", "bflb,bl808-usb";
++			reg = <0x20072000 0x1000>;
++			interrupts-extended = <&m0ic 21>;
++			syscon = <&sys_ctrl>;
++			pds = <&pds_ctrl>;
++			status = "disabled";
++		};
+ 		/*
+ 		ipclic: mailbox@30005000 {
+ 			compatible = "bflb,bl808-ipc";
+diff --git a/drivers/usb/fotg210/Kconfig b/drivers/usb/fotg210/Kconfig
+index 87a162582..3153258c8 100644
+--- a/drivers/usb/fotg210/Kconfig
++++ b/drivers/usb/fotg210/Kconfig
+@@ -4,8 +4,6 @@ config USB_FOTG210
+ 	tristate "Faraday FOTG210 USB2 Dual Role controller"
+ 	depends on USB || USB_GADGET
+ 	depends on HAS_DMA && HAS_IOMEM
+-	depends on ARCH_GEMINI || COMPILE_TEST
+-	default ARCH_GEMINI
+ 	select MFD_SYSCON
+ 	help
+ 	  Faraday FOTG210 is a dual-mode USB controller that can act
+@@ -35,4 +33,13 @@ config USB_FOTG210_UDC
+ 	   Say "y" to link the driver statically, or "m" to build a
+ 	   dynamically linked module called "fotg210-udc".
+ 
++config BFLB_FOTG210_PATCH
++	bool "Bouffalo Lab patch for setting up FOTG210"
++	depends on USB=y || USB=USB_FOTG210
++	default n
++	help
++		USB platform initialization like enable clock,
++		configure PLL and PDS, etc.
++		Say Y here to enable FOTG210 in Bouffalo Lab SoC.
++
+ endif
+diff --git a/drivers/usb/fotg210/fotg210-core.c b/drivers/usb/fotg210/fotg210-core.c
+index 958fc40ea..4836243ed 100644
+--- a/drivers/usb/fotg210/fotg210-core.c
++++ b/drivers/usb/fotg210/fotg210-core.c
+@@ -15,6 +15,7 @@
+ #include <linux/regmap.h>
+ #include <linux/usb.h>
+ #include <linux/usb/otg.h>
++#include <linux/bitfield.h>
+ 
+ #include "fotg210.h"
+ 
+@@ -93,6 +94,91 @@ static int fotg210_gemini_init(struct fotg210 *fotg, struct resource *res,
+ 	return 0;
+ }
+ 
++#define BFLB_CLKGATE_CFG1_REG		0x584
++#define BFLB_AHB_CLKGATE_USB_MASK	BIT(13)
++
++#define BFLB_WIFI_PLL_CFG10_REG		0x838
++#define BFLB_WIFI_PLL_MMDIV_MASK	BIT(29)
++#define BFLB_WIFI_PLL_RST_MASK		BIT(28)
++
++#define BFLB_PDS_USB_PHY_CTRL_REG	0x504
++#define BFLB_PDS_USB_PHY_PONRST_MASK	BIT(0)
++#define BFLB_PDS_USB_PHY_XTLSEL_MASK	BIT(2)
++#define BFLB_PDS_PU_USB20_PSW_MASK	BIT(6)
++
++#define BFLB_PDS_USB_CTL_REG		0x500
++#define BFLB_PDS_USB_SW_RST_MASK	BIT(0)
++#define BFLB_PDS_USB_EXT_SUSP_MASK	BIT(1)
++#define BFLB_PDS_USB_IDDIG_MASK		BIT(5)
++
++#define BFLB_USB_GLB_INT_REG		0xc4
++#define BFLB_USB_GLB_DEV_INT_MASK	BIT(0)
++#define BFLB_USB_GLB_OTG_INT_MASK	BIT(1)
++#define BFLB_USB_GLB_HOST_INT_MASK	BIT(2)
++
++static int bflb_usb_init(struct fotg210 *fotg)
++{
++#ifdef CONFIG_BFLB_FOTG210_PATCH
++	u32 tmp;
++	struct regmap *map;
++	struct device *dev = fotg->dev;
++	struct device_node *np = dev_of_node(dev);
++
++	map = syscon_regmap_lookup_by_phandle(np, "syscon");
++	if (IS_ERR(map))
++		return dev_err_probe(dev, PTR_ERR(map), "no syscon\n");
++
++	/* enable AHB clock gate for USB */
++	regmap_update_bits(map, BFLB_CLKGATE_CFG1_REG, BFLB_AHB_CLKGATE_USB_MASK,
++				FIELD_PREP(BFLB_AHB_CLKGATE_USB_MASK, 1));
++	/* set usb clock from wifi pll */
++	regmap_update_bits(map, BFLB_WIFI_PLL_CFG10_REG, BFLB_WIFI_PLL_MMDIV_MASK,
++				FIELD_PREP(BFLB_WIFI_PLL_MMDIV_MASK, 1));
++	regmap_update_bits(map, BFLB_WIFI_PLL_CFG10_REG, BFLB_WIFI_PLL_RST_MASK,
++				FIELD_PREP(BFLB_WIFI_PLL_RST_MASK, 1));
++	udelay(2);
++	regmap_update_bits(map, BFLB_WIFI_PLL_CFG10_REG, BFLB_WIFI_PLL_RST_MASK,
++				FIELD_PREP(BFLB_WIFI_PLL_RST_MASK, 0));
++	udelay(2);
++	regmap_update_bits(map, BFLB_WIFI_PLL_CFG10_REG, BFLB_WIFI_PLL_RST_MASK,
++				FIELD_PREP(BFLB_WIFI_PLL_RST_MASK, 1));
++	/* enable USB in PDS */
++	map = syscon_regmap_lookup_by_phandle(np, "pds");
++	if (IS_ERR(map))
++		return dev_err_probe(dev, PTR_ERR(map), "no pds\n");
++
++	regmap_update_bits(map, BFLB_PDS_USB_PHY_CTRL_REG, BFLB_PDS_USB_PHY_XTLSEL_MASK,
++				FIELD_PREP(BFLB_PDS_USB_PHY_XTLSEL_MASK, 0));
++	regmap_update_bits(map, BFLB_PDS_USB_PHY_CTRL_REG, BFLB_PDS_PU_USB20_PSW_MASK,
++				FIELD_PREP(BFLB_PDS_PU_USB20_PSW_MASK, 1));
++	regmap_update_bits(map, BFLB_PDS_USB_PHY_CTRL_REG, BFLB_PDS_USB_PHY_PONRST_MASK,
++				FIELD_PREP(BFLB_PDS_USB_PHY_PONRST_MASK, 1));
++	udelay(1);
++
++	regmap_update_bits(map, BFLB_PDS_USB_CTL_REG, BFLB_PDS_USB_SW_RST_MASK,
++			FIELD_PREP(BFLB_PDS_USB_SW_RST_MASK, 0));
++	udelay(1);
++	regmap_update_bits(map, BFLB_PDS_USB_CTL_REG, BFLB_PDS_USB_EXT_SUSP_MASK,
++			FIELD_PREP(BFLB_PDS_USB_EXT_SUSP_MASK, 1));
++	mdelay(3);
++	regmap_update_bits(map, BFLB_PDS_USB_CTL_REG, BFLB_PDS_USB_SW_RST_MASK,
++			FIELD_PREP(BFLB_PDS_USB_SW_RST_MASK, 1));
++	mdelay(2);
++
++	regmap_update_bits(map, BFLB_PDS_USB_CTL_REG, BFLB_PDS_USB_IDDIG_MASK,
++			FIELD_PREP(BFLB_PDS_USB_IDDIG_MASK, 0));
++
++	/* only enable usb host interrupt */
++	tmp = readl(fotg->base + BFLB_USB_GLB_INT_REG);
++	tmp &= ~BFLB_USB_GLB_HOST_INT_MASK;
++	tmp |= BFLB_USB_GLB_DEV_INT_MASK;
++	tmp |= BFLB_USB_GLB_OTG_INT_MASK;
++	writel(tmp, fotg->base + BFLB_USB_GLB_INT_REG);
++/* CONFIG_BFLB_FOTG210_PATCH */
++#endif
++	return 0;
++}
++
+ /**
+  * fotg210_vbus() - Called by gadget driver to enable/disable VBUS
+  * @enable: true to enable VBUS, false to disable VBUS
+@@ -151,6 +237,12 @@ static int fotg210_probe(struct platform_device *pdev)
+ 			return ret;
+ 	}
+ 
++	if (of_device_is_compatible(dev->of_node, "bflb,bl808-usb")) {
++		ret = bflb_usb_init(fotg);
++		if (ret)
++			return ret;
++	}
++
+ 	val = readl(fotg->base + FOTG210_RR);
+ 	if (mode == USB_DR_MODE_PERIPHERAL) {
+ 		if (!(val & FOTG210_RR_CROLE))
+diff --git a/drivers/usb/fotg210/fotg210-hcd.c b/drivers/usb/fotg210/fotg210-hcd.c
+index 929106c16..a8c3e30a3 100644
+--- a/drivers/usb/fotg210/fotg210-hcd.c
++++ b/drivers/usb/fotg210/fotg210-hcd.c
+@@ -5539,8 +5539,12 @@ static void fotg210_init(struct fotg210_hcd *fotg210)
+ {
+ 	u32 value;
+ 
++#ifdef CONFIG_BFLB_FOTG210_PATCH
+ 	iowrite32(GMIR_MDEV_INT | GMIR_MOTG_INT | GMIR_INT_POLARITY,
+ 			&fotg210->regs->gmir);
++#else
++	iowrite32(GMIR_MDEV_INT | GMIR_MOTG_INT, &fotg210->regs->gmir);
++#endif
+ 
+ 	value = ioread32(&fotg210->regs->otgcsr);
+ 	value &= ~OTGCSR_A_BUS_DROP;
