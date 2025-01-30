@@ -3,6 +3,7 @@
 # - /compile/source/linux-stable-obl - the kernel sources checked out from gitrepo
 # - /compile/result/stable-bl - the resulting kernel, modules etc. tar.gz files
 # - /compile/doc/kernel-config-options - https://github.com/hexdump0815/kernel-config-options
+# - /compile/doc/kernel-extra-patches - https://github.com/hexdump0815/kernel-extra-patches
 # name: stb-obl - linux stable based tree adjusted based on openbouffalo project bl808 tree
 
 # info: this is based on v6.5.11 of the linux-stable tree
@@ -20,10 +21,10 @@ cd /compile/source/linux-stable-obl
 # add some patches from the openbouffalo project - https://github.com/openbouffalo/buildroot_bouffalo
 # plus some more patches from https://github.com/bouffalolab/linux-dev
 for i in /compile/doc/stable-bl/misc.obl/patches/v6.5/00*.patch; do echo === $i; patch -p1 < $i; done
-# fix kernel version number: + instead of -dirty at the end
-patch -p1 < /compile/doc/stable-bl/misc.obl/patches/v6.5/fix-kernel-version-number.patch
 # enable usb host mode
 patch -p1 < /compile/doc/stable-bl/misc.obl/patches/v6.5/use-usb-host-mode.patch
+# fix kernel version number: + instead of -dirty at the end
+patch -p1 < /compile/doc/kernel-extra-patches/fix-kernel-version/v6.5.patch
 
 export ARCH=riscv
 # lets start with the openbouffalo defconfig and later adjust options from there
@@ -49,7 +50,7 @@ make modules_install
 #mkdir -p /lib/modules/${kver}/tools
 #cp -v tools/perf/perf /lib/modules/${kver}/tools
 #cp -v tools/power/cpupower/cpupower /lib/modules/${kver}/tools
-#cp -v tools/power/cpupower/libcpupower.so.0.0.1 /lib/modules/${kver}/tools/libcpupower.so.0
+#cp -v tools/power/cpupower/libcpupower.so.? /lib/modules/${kver}/tools
 # make headers_install INSTALL_HDR_PATH=/usr
 mkdir -p /boot
 cp -v .config /boot/config-${kver}
